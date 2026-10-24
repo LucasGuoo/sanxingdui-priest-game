@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>三星堆祭司 · 唤醒之仪</title>
+<style>
+  :root{
+    --bronze:#6b4f2a; --bronze-light:#caa15a; --gold:#e8c477;
+    --bg0:#0e0b07; --bg1:#1c140a; --ink:#f3e6c8; --accent:#7fd0c0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:radial-gradient(circle at 50% 30%,var(--bg1),var(--bg0));
+    color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;overflow:hidden;}
+  #wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;}
+  canvas{background:transparent;touch-action:none;}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;background:rgba(8,6,3,.82);backdrop-filter:blur(2px);padding:24px;z-index:10;}
+  .overlay h1{font-size:34px;margin:0 0 8px;letter-spacing:4px;color:var(--gold);}
+  .overlay p{margin:6px 0;max-width:560px;line-height:1.7;font-size:15px;opacity:.92;}
+  .keys{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:14px 0;}
+  .key{border:1px solid var(--bronze-light);border-radius:8px;padding:6px 12px;font-size:13px;background:rgba(202,161,90,.08);}
+  .key b{color:var(--gold);}
+  button.start{cursor:pointer;margin-top:14px;background:linear-gradient(180deg,var(--gold),var(--bronze-light));
+    color:#2a1d0a;border:none;border-radius:10px;padding:12px 30px;font-size:18px;font-weight:700;letter-spacing:2px;}
+  button.start:active{transform:translateY(1px);}
+  #hud{position:absolute;top:14px;left:0;right:0;display:flex;justify-content:space-between;padding:0 22px;
+    font-size:14px;z-index:5;pointer-events:none;}
+  #hud .box{background:rgba(20,14,7,.6);border:1px solid var(--bronze);border-radius:8px;padding:6px 12px;}
+  #awakenBar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);width:60%;height:14px;
+    background:rgba(20,14,7,.7);border:1px solid var(--bronze-light);border-radius:8px;overflow:hidden;z-index:5;}
+  #awakenFill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--gold));transition:width .15s;}
+  #factToast{position:absolute;top:64px;left:50%;transform:translateX(-50%);max-width:620px;z-index:6;
+    background:rgba(20,14,7,.92);border:1px solid var(--bronze-light);border-radius:10px;padding:12px 18px;
+    font-size:14px;line-height:1.6;opacity:0;transition:opacity .3s;pointer-events:none;}
+  #factToast .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:6px;margin-right:8px;}
+  .tag.fact{background:#2e5d4f;color:#cdeedf;}
+  .tag.fiction{background:#5d3a2e;color:#f0d2c2;}
+  .hidden{display:none!important;}
+  .small{font-size:12px;opacity:.7;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <div class="box">得分 <b id="score">0</b></div>
+    <div class="box">连击 <b id="combo">0</b></div>
+    <div class="box">时间 <b id="time">0:00</b></div>
+  </div>
+  <div id="awakenBar" class="hidden"><div id="awakenFill"></div></div>
+  <div id="factToast"></div>
+
+  <div id="startScreen" class="overlay">
+    <h1>三星堆祭司 · 唤醒之仪</h1>
+    <p>沉睡三千年的<b>祭司青铜头像</b>等待被唤醒。当祭祀光点抵达头像眉心判定圈时，
+       按下按键「铸入」仪式之音——连续命中积累<b>唤醒值</b>，唤醒祭司，聆听三星堆的故事。</p>
+    <div class="keys">
+      <div class="key"><b>手柄</b>：A 键 / 十字键↓ 命中</div>
+      <div class="key"><b>键盘</b>：空格 / 回车 命中</div>
+      <div class="key"><b>鼠标</b>：点击画面 命中</div>
+    </div>
+    <p class="small">主体文物：三星堆祭司青铜头像（商代，三星堆博物馆藏，1986 年二号祭祀坑出土）。
+       文化事实以馆方资料为准，游戏叙事为艺术演绎，详见结束页说明。</p>
+    <button class="start" id="startBtn">开始唤醒</button>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <h1>祭司已苏醒</h1>
+    <p>本局得分 <b id="finalScore">0</b> ｜ 最高连击 <b id="finalCombo">0</b></p>
+    <p id="endFacts" style="text-align:left;font-size:13px;"></p>
+    <p class="small">提交时请保留本页面作为「作品原件」。文化事实与艺术演绎的区分见仓库 README。</p>
+    <button class="start" id="retryBtn">再唤醒一次</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  let W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  function resize(){
+    W = Math.min(window.innerWidth, 1100);
+    H = Math.min(window.innerHeight, 760);
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    cv.width=W*DPR; cv.height=H*DPR;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize',resize); resize();
+
+  // ---------- 文化知识点（事实 vs 演绎严格分开）----------
+  const FACTS = [
+    {type:'fact', t:'三星堆祭司青铜头像为商代文物（公元前1600—前1046年）。', s:'馆方展签'},
+    {type:'fact', t:'1986 年出土于四川广汉三星堆二号祭祀坑。', s:'馆方出土信息'},
+    {type:'fact', t:'现藏于三星堆博物馆。', s:'馆方收藏单位'},
+    {type:'fact', t:'造型特征：头部呈圆筒形，大耳外张，眉眼与鼻部轮廓鲜明。', s:'馆方展览海报'},
+  ];
+  const FICTIONS = [
+    {type:'fiction', t:'艺术演绎：祭司以 oversized 的耳朵「聆听神谕」，是后人对三星堆大耳的想象。', s:'创作想象'},
+    {type:'fiction', t:'艺术演绎：头像在祭祀中「被唤醒」叙事，为增强互动体验而虚构。', s:'创作想象'},
+  ];
+  let factQueue=[];
+  function refillQueue(){ factQueue = [...FACTS, ...FICTIONS].sort(()=>Math.random()-0.5); }
+  refillQueue();
+
+  // ---------- 音频（WebAudio，无需任何外部文件，断网可运行）----------
+  let actx=null;
+  function audio(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return actx; }
+  function beep(freq, dur, type, vol){
+    const a=audio(); if(!a) return;
+    const o=a.createOscillator(), g=a.createGain();
+    o.type=type||'sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.18, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime+(dur||0.15));
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+(dur||0.15));
+  }
+  function hitSound(){ beep(660,0.12,'triangle',0.2); beep(990,0.10,'sine',0.12); }
+  function missSound(){ beep(140,0.18,'sawtooth',0.14); }
+
+  // ---------- 游戏状态 ----------
+  let state='menu'; // menu | play | end
+  let notes=[]; // {y, speed, hit:false, missed:false}
+  let score=0, combo=0, maxCombo=0, awaken=0;
+  let elapsed=0, lastT=0, spawnAcc=0, spawnGap=1.15, hitsForFact=0;
+  const HEAD_Y = ()=> H*0.30;      // 头像中心
+  const HIT_Y = ()=> H*0.30;       // 判定圈（眉心）
+  const SPAWN_Y = ()=> H-40;
+  const HIT_WIN = 46;              // 命中窗口(px)
+
+  function drawHead(awake){
+    const cx=W/2, cy=HEAD_Y(), s=Math.min(W,H)*0.16;
+    const lit = awake; // 0..1
+    // 圆筒形头部
+    ctx.save();
+    ctx.translate(cx,cy);
+    // 颈部
+    ctx.fillStyle = shade(lit);
+    ctx.fillRect(-s*0.34, s*0.7, s*0.68, s*0.9);
+    // 头颅圆筒
+    const grd=ctx.createLinearGradient(-s,0,s,0);
+    grd.addColorStop(0, shade(lit, -20));
+    grd.addColorStop(.5, lit>0.4? '#caa15a':'#5b4626');
+    grd.addColorStop(1, shade(lit, -30));
+    ctx.fillStyle=grd;
+    roundRect(-s*0.55, -s, s*1.1, s*1.7, s*0.22); ctx.fill();
+    // 大耳外张
+    ctx.fillStyle= lit>0.4? '#e8c477':'#6b4f2a';
+    ear(-s*0.62, -s*0.1, s, 1); ear(s*0.62, -s*0.1, s, -1);
+    // 眉眼与鼻部轮廓
+    ctx.strokeStyle = lit>0.4? '#2a1d0a':'#1c140a';
+    ctx.lineWidth = Math.max(2, s*0.04);
+    ctx.beginPath();
+    // 眉
+    ctx.moveTo(-s*0.32,-s*0.34); ctx.quadraticCurveTo(-s*0.1,-s*0.46, -s*0.02,-s*0.34);
+    ctx.moveTo(s*0.02,-s*0.34); ctx.quadraticCurveTo(s*0.1,-s*0.46, s*0.32,-s*0.34);
+    // 眼
+    ctx.moveTo(-s*0.28,-s*0.16); ctx.quadraticCurveTo(-s*0.12,-s*0.1, -s*0.02,-s*0.18);
+    ctx.moveTo(s*0.02,-s*0.18); ctx.quadraticCurveTo(s*0.12,-s*0.1, s*0.28,-s*0.16);
+    // 鼻
+    ctx.moveTo(0,-s*0.3); ctx.lineTo(-s*0.05, s*0.02); ctx.lineTo(s*0.05, s*0.02);
+    ctx.stroke();
+    // 判定圈（眉心）
+    ctx.beginPath();
+    ctx.arc(0,-s*0.02, 14, 0, Math.PI*2);
+    ctx.strokeStyle = lit>0.4? 'rgba(127,208,192,.9)':'rgba(202,161,90,.6)';
+    ctx.lineWidth=3; ctx.stroke();
+    if(lit>0.4){ ctx.beginPath(); ctx.arc(0,-s*0.02, 5,0,Math.PI*2); ctx.fillStyle='#7fd0c0'; ctx.fill(); }
+    ctx.restore();
+  }
+  function ear(x,y,s,dir){
+    ctx.save(); ctx.translate(x,y); ctx.scale(dir,1);
+    ctx.beginPath();
+    ctx.moveTo(0,-s*0.18);
+    ctx.quadraticCurveTo(s*0.5,-s*0.3, s*0.55, s*0.02);
+    ctx.quadraticCurveTo(s*0.5, s*0.28, 0, s*0.2);
+    ctx.quadraticCurveTo(s*0.18, s*0.0, 0,-s*0.18);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function shade(lit, d=0){
+    const base = lit>0.4? 120:70;
+    const v = Math.max(20, Math.min(200, base+d));
+    return `rgb(${v},${Math.round(v*0.78)},${Math.round(v*0.5)})`;
+  }
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  function spawn(){
+    notes.push({ y: SPAWN_Y(), speed: (SPAWN_Y()-HIT_Y())/ (1.6 + Math.random()*0.8), hit:false, missed:false });
+  }
+
+  function tryHit(){
+    if(state!=='play') return;
+    let best=null, bestD=1e9;
+    for(const n of notes){
+      if(n.hit||n.missed) continue;
+      const d=Math.abs(n.y-HIT_Y());
+      if(d<bestD){ bestD=d; best=n; }
+    }
+    if(best && bestD<=HIT_WIN){
+      best.hit=true;
+      const perfect = bestD<=HIT_WIN*0.5;
+      score += perfect? 120: 80;
+      combo++; maxCombo=Math.max(maxCombo,combo);
+      awaken=Math.min(100, awaken + (perfect?9:6));
+      hitsForFact++;
+      hitSound();
+      if(hitsForFact>=4){ hitsForFact=0; showFact(); }
+    } else {
+      combo=0; awaken=Math.max(0, awaken-8); missSound();
+    }
+    updateHUD();
+  }
+
+  // ---------- 手柄 / 键盘 / 鼠标 输入 ----------
+  const pressed=new Set();
+  function pollGamepad(){
+    if(!navigator.getGamepads) return;
+    const pads=navigator.getGamepads();
+    for(const p of pads){
+      if(!p) continue;
+      // A 键(0) 或 方向下(13)
+      const fire = p.buttons[0] && p.buttons[0].pressed || (p.buttons[13]&&p.buttons[13].pressed);
+      if(fire && !pressed.has('gp')){ pressed.add('gp'); tryHit(); }
+      if(!fire) pressed.delete('gp');
+    }
+  }
+  window.addEventListener('keydown', e=>{
+    if(['Space','Enter','ArrowDown'].includes(e.code)){
+      e.preventDefault();
+      if(!pressed.has(e.code)){ pressed.add(e.code); tryHit(); }
+    }
+  });
+  window.addEventListener('keyup', e=> pressed.delete(e.code));
+  cv.addEventListener('pointerdown', ()=> tryHit());
+
+  // ---------- 主循环 ----------
+  function loop(ts){
+    requestAnimationFrame(loop);
+    if(state!=='play'){ render(); return; }
+    const dt = Math.min(0.05, (ts-lastT)/1000 || 0); lastT=ts;
+    elapsed += dt;
+    spawnAcc += dt;
+    const gap = Math.max(0.65, spawnGap - elapsed*0.01); // 难度渐增
+    if(spawnAcc>=gap){ spawnAcc=0; spawn(); }
+    for(const n of notes){ if(!n.hit&&!n.missed) n.y -= n.speed*dt; }
+    // 漏判
+    for(const n of notes){
+      if(!n.hit&&!n.missed && n.y < HIT_Y()-HIT_WIN){
+        n.missed=true; combo=0; awaken=Math.max(0,awaken-6); missSound(); updateHUD();
+      }
+    }
+    notes = notes.filter(n=> !(n.hit) && n.y > -30 && !(n.missed && n.y < HIT_Y()-HIT_WIN-20));
+    pollGamepad();
+    // 时间显示（仅展示，不强制结束；录屏控制在 3 分钟内）
+    const m=Math.floor(elapsed/60), s=Math.floor(elapsed%60);
+    document.getElementById('time').textContent = m+':'+String(s).padStart(2,'0');
+    render();
+  }
+
+  function render(){
+    ctx.clearRect(0,0,W,H);
+    // 轨道
+    ctx.strokeStyle='rgba(202,161,90,.18)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(W/2, HIT_Y()); ctx.lineTo(W/2, SPAWN_Y()); ctx.stroke();
+    // 判定圈位置提示
+    ctx.beginPath(); ctx.arc(W/2,HIT_Y(),HIT_WIN,0,Math.PI*2);
+    ctx.strokeStyle='rgba(127,208,192,.35)'; ctx.stroke();
+    // 光点
+    const awake = awaken/100;
+    for(const n of notes){
+      if(n.hit){ continue; }
+      const a = n.missed?0.25:1;
+      ctx.beginPath(); ctx.arc(W/2, n.y, 12, 0, Math.PI*2);
+      ctx.fillStyle = n.missed? 'rgba(150,90,70,'+a+')' : 'rgba(232,196,119,'+a+')';
+      ctx.fill();
+      ctx.beginPath(); ctx.arc(W/2, n.y, 5,0,Math.PI*2); ctx.fillStyle='#fff7e0'; ctx.fill();
+    }
+    drawHead(awake);
+    // 唤醒光晕
+    if(awake>0.4){
+      ctx.save(); ctx.globalAlpha=(awake-0.4)*0.6;
+      const g=ctx.createRadialGradient(W/2,HEAD_Y(),10,W/2,HEAD_Y(),Math.min(W,H)*0.4);
+      g.addColorStop(0,'rgba(127,208,192,.5)'); g.addColorStop(1,'rgba(127,208,192,0)');
+      ctx.fillStyle=g; ctx.fillRect(0,0,W,H); ctx.restore();
+    }
+  }
+
+  function updateHUD(){
+    document.getElementById('score').textContent=score;
+    document.getElementById('combo').textContent=combo;
+    document.getElementById('awakenFill').style.width=awaken+'%';
+  }
+
+  const toast=document.getElementById('factToast');
+  let toastTimer=null;
+  function showFact(){
+    const f = factQueue.length? factQueue.shift() : FACTS[0];
+    if(factQueue.length===0) refillQueue();
+    toast.innerHTML = `<span class="tag ${f.type}">${f.type==='fact'?'文化事实':'艺术演绎'}</span>${f.t}<br><span class="small">来源：${f.s}</span>`;
+    toast.style.opacity=1;
+    clearTimeout(toastTimer);
+    toastTimer=setTimeout(()=> toast.style.opacity=0, 3200);
+  }
+
+  function startGame(){
+    audio(); if(actx && actx.state==='suspended') actx.resume();
+    state='play'; elapsed=0; lastT=performance.now(); score=0; combo=0; maxCombo=0; awaken=0;
+    notes=[]; spawnAcc=0; hitsForFact=0; refillQueue();
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('endScreen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('awakenBar').classList.remove('hidden');
+    updateHUD();
+  }
+  function endGame(){
+    state='end';
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('awakenBar').classList.add('hidden');
+    document.getElementById('finalScore').textContent=score;
+    document.getElementById('finalCombo').textContent=maxCombo;
+    const fc = FACTS.map(f=>`• <b>[文化事实]</b> ${f.t}`).join('<br>');
+    const fi = FICTIONS.map(f=>`• <b>[艺术演绎]</b> ${f.t}`).join('<br>');
+    document.getElementById('endFacts').innerHTML = `<b>已核对的馆方文化事实：</b><br>${fc}<br><br><b>本作艺术演绎（非史实）：</b><br>${fi}`;
+    document.getElementById('endScreen').classList.remove('hidden');
+  }
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('retryBtn').addEventListener('click', startGame);
+  // 结束按钮（键盘 E 或 手柄 Start 不强制，提供手动结束）
+  window.addEventListener('keydown', e=>{ if(e.code==='KeyE' && state==='play'){ endGame(); }});
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
